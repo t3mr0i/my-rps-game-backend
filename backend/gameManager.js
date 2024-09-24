@@ -1,10 +1,27 @@
+const { initializeApp } = require('firebase/app');
+const { getFirestore, doc, setDoc, getDoc, updateDoc, arrayUnion } = require('firebase/firestore');
+
+// Firebase configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyBy7h2IqsRmcUnss6mst-Zd1tCMM0Z4HE0",
+    authDomain: "rps-game-6b432.firebaseapp.com",
+    projectId: "rps-game-6b432",
+    storageBucket: "rps-game-6b432.appspot.com",
+    messagingSenderId: "789772515371",
+    appId: "1:789772515371:web:8e56f3e0e3601421b5526e",
+    measurementId: "G-Q2PHBHJRG4"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 class GameManager {
     constructor() {
         this.games = {}; // Store all game states
     }
 
-
-    createNewGame(gameId, numberOfPlayers, password = null) {
+    async createNewGame(gameId, numberOfPlayers, password = null) {
         const newState = {
             id: gameId,
             board: this.initializeBoard(numberOfPlayers),
@@ -21,41 +38,54 @@ class GameManager {
             numberOfPlayers,
         };
 
-        this.games[gameId] = newState;
+        await setDoc(doc(db, 'games', gameId), newState);
         return newState;
     }
 
-    startGame(gameId) {
-        const game = this.games[gameId];
-        if (game && game.players.length > 1 && !game.isStarted) {
-            game.isStarted = true;
-            return true; // Indicate the game started successfully
+    async startGame(gameId) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (gameSnap.exists()) {
+            const game = gameSnap.data();
+            if (game.players.length > 1 && !game.isStarted) {
+                await updateDoc(gameRef, { isStarted: true });
+                return true; // Indicate the game started successfully
+            }
         }
         return false; // Game did not start
     }
 
-
-    isGamePasswordProtected(gameId) {
-        const game = this.games[gameId];
-        return game && game.password;
+    async isGamePasswordProtected(gameId) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (gameSnap.exists()) {
+            const game = gameSnap.data();
+            return game.password;
+        }
+        return false;
     }
 
-    isPasswordCorrect(gameId, password) {
-        const game = this.games[gameId];
-        return game && game.password === password;
+    async isPasswordCorrect(gameId, password) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (gameSnap.exists()) {
+            const game = gameSnap.data();
+            return game.password === password;
+        }
+        return false;
     }
 
-    getAllGames() {
-        return Object.values(this.games).map(game => ({
-            id: game.id,
-            isStarted: game.isStarted,
-            playerCount: game.players.length
-        }));
-
+    async getAllGames() {
+        const gamesSnapshot = await getDocs(collection(db, 'games'));
+        return gamesSnapshot.docs.map(doc => {
+            const game = doc.data();
+            return {
+                id: game.id,
+                isStarted: game.isStarted,
+                playerCount: game.players.length
+            };
+        });
     }
-
-
-
 
     initializeBoard(numberOfPlayers) {
         let board = numberOfPlayers % 2 === 1 ? this.initializeHexagonalBoard(numberOfPlayers) : this.initializeRectangularBoard(numberOfPlayers);
@@ -84,37 +114,22 @@ class GameManager {
         return board;
     }
 
-
-
     createEmptyCell() {
         return { character: null, isTrap: false, isFlag: false };
     }
 
-    placeInitialItems(board, numberOfPlayers) {
-        // Randomly assign characters, flags, and traps for each player's area
-        // For simplicity, here's a basic approach. You'll want to refine this.
-        board.forEach((row, rowIndex) => {
-            row.forEach((cell, cellIndex) => {
-                // Logic to place characters and special items based on player areas
-                // This is a simplified example. Customize based on game rules.
-                if (Math.random() < 0.1) cell.isTrap = true; // 10% chance of being a trap
-                if (Math.random() < 0.05) cell.isFlag = true; // 5% chance of being a flag
-                else cell.character = { type: ['R', 'P', 'S'][Math.floor(Math.random() * 3)] }; // Randomly assign R, P, or S
-            });
-        });
-    }
-
-    addPlayerToGame(gameId, playerId) {
-        const game = this.getGameState(gameId);
-        if (game) {
-            // Check if the player is already in the game
+    async addPlayerToGame(gameId, playerId) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (gameSnap.exists()) {
+            const game = gameSnap.data();
             const isPlayerInGame = game.players.some(player => player.id === playerId);
 
             if (!isPlayerInGame) {
-                // Find an empty spot for the new player
                 const emptySpotIndex = game.players.findIndex(player => player.id === null);
                 if (emptySpotIndex !== -1) {
                     game.players[emptySpotIndex].id = playerId;
+                    await updateDoc(gameRef, { players: game.players });
                 } else {
                     // Handle the case where there's no room for a new player
                     // This depends on your game logic, e.g., you might want to send an error message
@@ -123,22 +138,25 @@ class GameManager {
         }
     }
 
-
-    getGameState(gameId) {
-        return this.games[gameId];
-    }
-
-    addPlayerToGame(gameId, playerId) {
-        const game = this.getGameState(gameId);
-        if (game && !game.players.includes(playerId)) {
-            game.players.push(playerId);
+    async getGameState(gameId) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (gameSnap.exists()) {
+            return gameSnap.data();
         }
+        return null;
     }
 
-    handleMove(gameId, playerId, move) {
-        const game = this.getGameState(gameId);
-        if (!game || game.players[game.currentPlayerIndex].id !== playerId || !game.isStarted) {
-            return { success: false, message: "It's not your turn, the game hasn't started, or the game does not exist." };
+    async handleMove(gameId, playerId, move) {
+        const gameRef = doc(db, 'games', gameId);
+        const gameSnap = await getDoc(gameRef);
+        if (!gameSnap.exists()) {
+            return { success: false, message: "Game does not exist." };
+        }
+
+        const game = gameSnap.data();
+        if (game.players[game.currentPlayerIndex].id !== playerId || !game.isStarted) {
+            return { success: false, message: "It's not your turn or the game hasn't started." };
         }
 
         const { characterId, newX, newY } = move;
@@ -170,7 +188,7 @@ class GameManager {
 
         this.checkWinCondition(gameId);
         game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length;
-        this.updateGameState(gameId, game);
+        await updateDoc(gameRef, game);
         return { success: true, message: "Move completed successfully." };
     }
 
@@ -194,7 +212,6 @@ class GameManager {
         return character1.playerId === character2.playerId;
     }
 
-
     resolveCombat(attacker, defender) {
         const rules = {
             'R': 'S', // Rock crushes Scissors
@@ -212,8 +229,8 @@ class GameManager {
         }
     }
 
-    checkWinCondition(gameId) {
-        const game = this.getGameState(gameId);
+    async checkWinCondition(gameId) {
+        const game = await this.getGameState(gameId);
         let isGameOver = false;
         let winningPlayerId = null;
 
@@ -232,73 +249,16 @@ class GameManager {
         }
     }
 
-    updateGameState(gameId, newState) {
-        this.games[gameId] = newState;
-        io.to(gameId).emit('gameState', newState); // Notify all clients in the room about the game state update
-    }
-
-
-    resolveCombat(gameId, x, y) {
-        const game = this.getGameState(gameId);
-        if (!game) return;
-
-        const cell = game.board[x][y];
-        if (!cell.character) return;
-
-        // Directions to check for adjacent characters
-        const directions = [[1, 0], [0, 1], [-1, 0], [0, -1]]; // Down, Right, Up, Left
-        directions.forEach(([dx, dy]) => {
-            const adjacentX = x + dx;
-            const adjacentY = y + dy;
-            if (this.isValidPosition(adjacentX, adjacentY, game.board)) {
-                const adjacentCell = game.board[adjacentX][adjacentY];
-                if (adjacentCell.character) {
-                    // Resolve combat based on RPS rules
-                    const winner = this.determineCombatWinner(cell.character, adjacentCell.character);
-                    if (winner) {
-                        // Update board based on combat outcome
-                        adjacentCell.character = winner === cell.character ? null : adjacentCell.character;
-                        cell.character = winner === adjacentCell.character ? null : cell.character;
-                    }
-                }
-            }
+    async endGame(gameId, winningPlayerId) {
+        const gameRef = doc(db, 'games', gameId);
+        await updateDoc(gameRef, {
+            isGameOver: true,
+            winningPlayerId: winningPlayerId
         });
-    }
-
-    determineCombatWinner(character1, character2) {
-        const combatRules = { 'R': 'S', 'P': 'R', 'S': 'P' }; // Rock beats Scissors, Paper beats Rock, Scissors beats Paper
-        if (combatRules[character1.type] === character2.type) {
-            return character1; // character1 wins
-        } else if (combatRules[character2.type] === character1.type) {
-            return character2; // character2 wins
-        }
-        return null; // Tie or no combat
-    }
-
-    isValidPosition(x, y, board) {
-        return x >= 0 && y >= 0 && x < board.length && y < board[0].length;
-    }
-
-
-    checkWinCondition(gameId) {
-        const game = this.getGameState(gameId);
-        if (!game) return;
-
-        // Check if a player has captured the flag or eliminated all opponents
-        // ...
-
-        // If win condition met, handle end of game
-    }
-
-    endGame(gameId, winningPlayerId) {
-        const game = this.getGameState(gameId);
-        game.isGameOver = true;
-        game.winningPlayerId = winningPlayerId;
         // Notify players that the game has ended and send the id of the winning player
-        io.to(gameId).emit('gameOver', { winner: winningPlayerId });
         // Additional logic for cleaning up the game state, if necessary
     }
-
 }
+
 module.exports = GameManager;
 
