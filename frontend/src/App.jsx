@@ -37,7 +37,7 @@ function App() {
       const game = {
         isStarted: false,
         players: [user.uid],
-        board: Array(8).fill(Array(8).fill({ character: null, isTrap: false, isFlag: false }))
+        board: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => ({ character: null, isTrap: false, isFlag: false })))
       };
       const gameRef = await addDoc(collection(db, 'games'), game);
       setCurrentGame({ id: gameRef.id, ...game });
@@ -82,8 +82,8 @@ function App() {
             <h2 className="text-2xl font-bold">Game ID: {currentGame.id}</h2>
             <h3 className="text-xl">Players:</h3>
             <ul>
-              {currentGame.players.map(player => (
-                <li key={player}>{player}</li>
+              {currentGame.players.map((player, index) => (
+                <li key={index}>{player}</li>
               ))}
             </ul>
             <GameBoard board={currentGame.board} />

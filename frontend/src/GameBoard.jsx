@@ -7,7 +7,7 @@ const GameBoard = ({ board }) => {
         <div key={rowIndex} className="flex">
           {row.map((cell, cellIndex) => (
             <div key={cellIndex} className="w-8 h-8 border border-gray-500 flex items-center justify-center">
-              {cell.character ? cell.character.type : ''}
+              {cell.character ? <img src={`/img/${cell.character.type}.png`} alt={cell.character.type} /> : ''}
             </div>
           ))}
         </div>
