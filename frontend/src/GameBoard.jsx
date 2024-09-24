@@ -1,6 +1,12 @@
 import React from 'react';
 
 const GameBoard = ({ board }) => {
+  console.log('Board data:', board);
+
+  if (!Array.isArray(board) || !board.every(row => Array.isArray(row))) {
+    return <div>Error: Invalid board data</div>;
+  }
+
   return (
     <div className="grid grid-cols-8 gap-1">
       {board.map((row, rowIndex) => (

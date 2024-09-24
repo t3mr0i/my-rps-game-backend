@@ -32,12 +32,22 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+  const serializeBoard = (board) => {
+    return board.map((row, rowIndex) => {
+      return { [rowIndex]: row };
+    });
+  };
+
+  const deserializeBoard = (board) => {
+    return board.map(row => row[Object.keys(row)[0]]);
+  };
+
   const createGame = async () => {
     if (user) {
       const game = {
         isStarted: false,
         players: [user.uid],
-        board: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => ({ character: null, isTrap: false, isFlag: false })))
+        board: serializeBoard(Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => ({ character: null, isTrap: false, isFlag: false }))))
       };
       const gameRef = await addDoc(collection(db, 'games'), game);
       setCurrentGame({ id: gameRef.id, ...game });
@@ -51,7 +61,9 @@ function App() {
         players: arrayUnion(user.uid)
       });
       const gameSnap = await getDoc(gameRef);
-      setCurrentGame({ id: gameSnap.id, ...gameSnap.data() });
+      const gameData = gameSnap.data();
+      gameData.board = deserializeBoard(gameData.board);
+      setCurrentGame({ id: gameSnap.id, ...gameData });
     }
   };
 
