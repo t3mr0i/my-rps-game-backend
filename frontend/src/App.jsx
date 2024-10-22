@@ -1,104 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth, rtdb } from './firebase';
-import { collection, onSnapshot, addDoc, updateDoc, doc, arrayUnion, getDoc, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { ref, onValue, set, push, get, update } from 'firebase/database';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
 import Auth from './Auth';
-import { Chessboard } from 'react-chessboard';
 import { FaUserCircle, FaCircle, FaCopy, FaBars, FaTimes } from 'react-icons/fa';
 import GameBrowser from './GameBrowser';
 import Chat from './Chat';
-
-// Custom piece components
-const CustomPiece = ({ type }) => {
-  const pieceStyle = { fontSize: '40px', fontWeight: 'bold', cursor: 'grab' };
-  const pieceIcons = {
-    'bR': '🪨', 'bP': '📄', 'bS': '✂️',
-    'wR': '🪨', 'wP': '📄', 'wS': '✂️',
-  };
-  return <div style={pieceStyle}>{pieceIcons[type]}</div>;
-};
-
-const customPieces = {
-  bR: () => <CustomPiece type="bR" />,
-  bP: () => <CustomPiece type="bP" />,
-  bS: () => <CustomPiece type="bS" />,
-  wR: () => <CustomPiece type="wR" />,
-  wP: () => <CustomPiece type="wP" />,
-  wS: () => <CustomPiece type="wS" />,
-};
-
-const initialBoard = () => {
-  const board = Array(7).fill(null).map(() => Array(7).fill(null).map(() => ({
-    character: null,
-    isFlag: false,
-    isTrap: false
-  })));
-
-  const assignCharacter = (row, type) => {
-    const items = ['rock', 'paper', 'scissors'];
-    for (let col = 0; col < 7; col++) {
-      board[row][col] = {
-        character: { type: `${type}-${items[Math.floor(Math.random() * items.length)]}` },
-        isFlag: false,
-        isTrap: false
-      };
-    }
-  };
-
-  assignCharacter(0, 'blue');
-  assignCharacter(1, 'blue');
-  assignCharacter(5, 'red');
-  assignCharacter(6, 'red');
-
-  return board;
-};
-
-const serializeBoard = (board) => {
-  return board.flat().map(cell => ({
-    character: cell.character ? { type: cell.character.type } : null,
-    isFlag: cell.isFlag,
-    isTrap: cell.isTrap
-  }));
-};
-
-const deserializeBoard = (serializedBoard) => {
-  const board = [];
-  for (let i = 0; i < 7; i++) {
-    board.push(serializedBoard.slice(i * 7, (i + 1) * 7));
-  }
-  return board;
-};
+import GameBoard from './components/GameBoard';
+import GameInfo from './components/GameInfo';
+import { initialBoard, createPiece, isValidMove, resolveCombat, checkWinCondition } from './utils/gameLogic';
+import { boardToPosition, customPieces } from './utils/pieceUtils';
+import { useLocation } from 'react-router-dom';
 
 const App = () => {
   const [games, setGames] = useState([]);
   const [user, setUser] = useState(null);
   const [currentGame, setCurrentGame] = useState(null);
   const [board, setBoard] = useState(initialBoard());
-  const [placingFlag, setPlacingFlag] = useState(false);
-  const [placingTrap, setPlacingTrap] = useState(false);
-  const [selectedCell, setSelectedCell] = useState(null);
-  const [validMoves, setValidMoves] = useState([]);
+  const [gameStage, setGameStage] = useState('setup'); // 'setup', 'play', 'ended'
+  const [setupPhase, setSetupPhase] = useState('placing'); // 'placing', 'flag', 'trap'
+  const [placedPieces, setPlacedPieces] = useState(0);
   const [turn, setTurn] = useState(null);
-  const [newName, setNewName] = useState('');
+  const [playerColor, setPlayerColor] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [position, setPosition] = useState({});
   const [inviteLink, setInviteLink] = useState('');
   const [publicGames, setPublicGames] = useState([]);
   const [privateGames, setPrivateGames] = useState([]);
-  const [setupComplete, setSetupComplete] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'games'), (snapshot) => {
-      const gamesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setGames(gamesList);
-    });
-    return () => unsubscribe();
-  }, []);
+  const location = useLocation();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -130,13 +63,10 @@ const App = () => {
       const unsubscribe = onValue(gameRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
-          setCurrentGame(prevGame => ({
-            ...prevGame,
-            ...data,
-            board: deserializeBoard(data.board)
-          }));
+          setCurrentGame(data);
+          setBoard(data.board || initialBoard());  // Ensure board is always set
+          setGameStage(data.gameStage);
           setTurn(data.turn);
-          setPosition(boardToPosition(deserializeBoard(data.board)));
         }
       });
       return () => unsubscribe();
@@ -145,7 +75,7 @@ const App = () => {
 
   useEffect(() => {
     const handleGameLink = async () => {
-      const path = window.location.pathname;
+      const path = location.pathname;
       const match = path.match(/\/game\/(.+)/);
       if (match && match[1]) {
         const gameId = match[1];
@@ -154,22 +84,25 @@ const App = () => {
     };
 
     handleGameLink();
-  }, [user]); // Add this useEffect near the top of your component
+  }, [location, user]);
 
   const createGame = async (isPublic = true) => {
     if (user) {
+      const newBoard = Array(7).fill(null).map(() => Array(7).fill(null));
       const newGameRef = push(ref(rtdb, 'games'));
       const newGame = {
         id: newGameRef.key,
-        board: serializeBoard(initialBoard()),
-        players: [user.uid],
-        isStarted: false,
-        isPublic: isPublic,
-        turn: null,
-        setupComplete: false
+        players: [{ id: user.uid, name: user.displayName || 'Player 1' }],
+        board: newBoard,
+        gameStage: 'setup',
+        setupPhase: 'placing',
+        turn: user.uid,
+        isPublic: isPublic
       };
       await set(newGameRef, newGame);
-      setCurrentGame({ ...newGame, board: deserializeBoard(newGame.board) });
+      setCurrentGame(newGame);
+      setBoard(newBoard);
+      setPlayerColor('blue');
       setInviteLink(`${window.location.origin}/game/${newGameRef.key}`);
       toast.success('Game created successfully!');
     } else {
@@ -178,258 +111,158 @@ const App = () => {
   };
 
   const joinGame = async (gameId) => {
-    if (!user) {
-      await signInAnonymously(auth);
-    }
-    const gameRef = ref(rtdb, `games/${gameId}`);
-    const gameSnapshot = await get(gameRef);
-    
-    if (gameSnapshot.exists()) {
-      const gameData = gameSnapshot.val();
-      if (!gameData.players.includes(user.uid) && gameData.players.length < 2) {
-        const updatedPlayers = [...gameData.players, user.uid];
-        await update(gameRef, { players: updatedPlayers });
-        setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board), players: updatedPlayers });
-        toast.success('Joined game successfully!');
-      } else if (gameData.players.includes(user.uid)) {
-        setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board) });
-        toast.info('Rejoined existing game.');
+    if (user) {
+      const gameRef = ref(rtdb, `games/${gameId}`);
+      const gameSnapshot = await get(gameRef);
+      if (gameSnapshot.exists()) {
+        const gameData = gameSnapshot.val();
+        if (gameData.players.length < 2) {
+          const updatedPlayers = [...gameData.players, { id: user.uid, name: user.displayName || 'Player 2' }];
+          await update(gameRef, { players: updatedPlayers });
+          setCurrentGame({ ...gameData, id: gameId, players: updatedPlayers });
+          setPlayerColor(gameData.players[0].id === user.uid ? 'blue' : 'red');
+          setBoard(gameData.board || initialBoard());
+          setGameStage(gameData.gameStage || 'setup');
+          setTurn(gameData.turn || gameData.players[0].id);
+          toast.success('Joined game successfully!');
+        } else {
+          toast.error('Game is full.');
+        }
       } else {
-        toast.error('Game is full!');
+        toast.error('Game not found.');
       }
     } else {
-      toast.error('Game not found!');
+      toast.error('Please sign in to join a game.');
     }
   };
 
-  const copyInviteLink = () => {
-    navigator.clipboard.writeText(inviteLink);
-    toast.info('Invite link copied to clipboard!');
-  };
+  const handleSetupPlacement = (square) => {
+    if (gameStage !== 'setup' || turn !== user.uid) return;
 
-  const startGame = () => {
-    if (currentGame && currentGame.players.length === 2 && setupComplete) {
-      const startingPlayer = Math.random() < 0.5 ? 'blue' : 'red';
-      setTurn(startingPlayer);
-      updateGameState({
-        isStarted: true,
-        turn: startingPlayer
-      });
-      toast.success('Game started!');
-    } else {
-      toast.error('Cannot start game. Ensure both players have completed setup.');
+    const [col, row] = square.split('');
+    const rowIndex = 7 - parseInt(row);
+    const colIndex = 'abcdefg'.indexOf(col);
+
+    // Check if the clicked square is in the player's starting area
+    const isValidStartingArea = playerColor === 'blue' ? rowIndex >= 5 : rowIndex <= 1;
+
+    if (!isValidStartingArea) {
+      toast.error('You can only place pieces in your starting area.');
+      return;
     }
-  };
 
-  const checkGameOver = (board) => {
-    for (let row of board) {
-      for (let cell of row) {
-        if (cell.isFlag && cell.character) {
-          return true; // Game over if flag is captured
+    let newBoard = [...board];
+    if (!newBoard[rowIndex]) {
+      newBoard[rowIndex] = Array(7).fill(null);
+    }
+
+    if (setupPhase === 'placing') {
+      if (placedPieces < 12) {
+        const pieceType = ['rock', 'paper', 'scissors'][Math.floor(Math.random() * 3)];
+        newBoard[rowIndex][colIndex] = createPiece(pieceType, playerColor);
+        setPlacedPieces(placedPieces + 1);
+        if (placedPieces === 11) {
+          setSetupPhase('flag');
         }
       }
+    } else if (setupPhase === 'flag') {
+      newBoard[rowIndex][colIndex] = createPiece('flag', playerColor);
+      setSetupPhase('trap');
+    } else if (setupPhase === 'trap') {
+      newBoard[rowIndex][colIndex] = createPiece('trap', playerColor);
+      finishSetup();
     }
-    return false;
+
+    setBoard(newBoard);
+    updateGameState({ board: newBoard });
+  };
+
+  const finishSetup = () => {
+    updateGameState({
+      [`${playerColor}Ready`]: true,
+      turn: currentGame.players.find(p => p.id !== user.uid).id
+    });
+    toast.success('Setup complete. Waiting for opponent.');
   };
 
   const handleMove = (from, to) => {
-    if (currentGame.turn !== (currentGame.players[0] === user.uid ? 'blue' : 'red')) {
-      toast.error("It's not your turn!");
+    if (gameStage !== 'play' || turn !== user.uid) return;
+
+    const [fromCol, fromRow] = from.split('');
+    const [toCol, toRow] = to.split('');
+    const fromIndex = [7 - parseInt(fromRow), 'abcdefg'.indexOf(fromCol)];
+    const toIndex = [7 - parseInt(toRow), 'abcdefg'.indexOf(toCol)];
+
+    if (!isValidMove(fromIndex, toIndex)) {
+      toast.error('Invalid move');
       return;
     }
 
     const newBoard = [...board];
-    const [fromRow, fromCol] = from;
-    const [toRow, toCol] = to;
-    const movingPiece = newBoard[fromRow][fromCol].character;
-    const targetPiece = newBoard[toRow][toCol].character;
+    const movingPiece = newBoard[fromIndex[0]][fromIndex[1]];
+    const targetPiece = newBoard[toIndex[0]][toIndex[1]];
 
-    if (targetPiece && movingPiece.type.split('-')[0] !== targetPiece.type.split('-')[0]) {
-      // Duel logic
-      const winner = determineWinner(movingPiece.type.split('-')[1], targetPiece.type.split('-')[1]);
-      if (winner === movingPiece.type.split('-')[1]) {
-        newBoard[toRow][toCol].character = movingPiece; // Move piece
-        toast.success(`${movingPiece.type} defeats ${targetPiece.type}!`);
+    if (targetPiece) {
+      if (targetPiece.type === 'flag') {
+        endGame(playerColor);
+        return;
+      }
+      if (targetPiece.type === 'trap') {
+        newBoard[fromIndex[0]][fromIndex[1]] = null;
+        newBoard[toIndex[0]][toIndex[1]] = null;
       } else {
-        newBoard[toRow][toCol].character = targetPiece; // Target piece stays
-        toast.error(`${targetPiece.type} defeats ${movingPiece.type}!`);
-      }
-      newBoard[fromRow][fromCol].character = null; // Clear original position
-    } else {
-      if (newBoard[toRow][toCol].isTrap) {
-        newBoard[toRow][toCol].character = null; // Trap triggered, piece dies
-        toast.warning('Trap triggered! Piece destroyed.');
-      } else {
-        newBoard[toRow][toCol].character = movingPiece; // Move piece
-      }
-      newBoard[fromRow][fromCol].character = null; // Clear original position
-    }
-
-    setBoard(newBoard);
-    updateGameState({
-      board: newBoard,
-      turn: turn === 'blue' ? 'red' : 'blue'
-    });
-
-    if (checkGameOver(newBoard)) {
-      toast.success(`Game Over! ${turn === 'blue' ? 'Blue' : 'Red'} wins!`);
-      updateGameState({ isStarted: false });
-    }
-  };
-
-  const handlePlaceFlag = (rowIndex, cellIndex) => {
-    const newBoard = [...board];
-    newBoard[rowIndex][cellIndex].isFlag = true;
-    setBoard(newBoard);
-    setPlacingFlag(false);
-    checkSetupComplete();
-    updateGameState({ board: newBoard });
-  };
-
-  const handlePlaceTrap = (rowIndex, cellIndex) => {
-    const newBoard = [...board];
-    newBoard[rowIndex][cellIndex].isTrap = true;
-    setBoard(newBoard);
-    setPlacingTrap(false);
-    checkSetupComplete();
-    updateGameState({ board: newBoard });
-  };
-
-  const checkSetupComplete = () => {
-    const playerSetupComplete = board.some(row => row.some(cell => cell.isFlag)) &&
-                                board.some(row => row.some(cell => cell.isTrap));
-    if (playerSetupComplete) {
-      setSetupComplete(true);
-      updateGameState({ setupComplete: true });
-    }
-  };
-
-  const handleCellClick = (rowIndex, cellIndex) => {
-    if (!currentGame || !user) return;
-
-    const playerColor = currentGame.players[0] === user.uid ? 'blue' : 'red';
-    if (turn !== playerColor) {
-      console.log("It's not your turn!");
-      return;
-    }
-
-    if (placingFlag) {
-      handlePlaceFlag(rowIndex, cellIndex);
-    } else if (placingTrap) {
-      handlePlaceTrap(rowIndex, cellIndex);
-    } else if (selectedCell) {
-      handleMove(selectedCell, [rowIndex, cellIndex]);
-      setSelectedCell(null);
-      setValidMoves([]);
-    } else {
-      setSelectedCell([rowIndex, cellIndex]);
-      setValidMoves(getValidMoves(rowIndex, cellIndex, board));
-    }
-  };
-
-  const determineWinner = (type1, type2) => {
-    if (type1 === type2) return null; // Draw
-    if ((type1 === 'rock' && type2 === 'scissors') ||
-        (type1 === 'scissors' && type2 === 'paper') ||
-        (type1 === 'paper' && type2 === 'rock')) {
-      return type1;
-    }
-    return type2;
-  };
-
-  const showModal = (winner, movingPiece, targetPiece) => {
-    const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.innerHTML = `
-      <div class="modal-content">
-        <span class="close-button">&times;</span>
-        <p>${winner ? `${winner} wins!` : 'It\'s a draw!'}</p>
-        <p>${movingPiece.type} vs ${targetPiece.type}</p>
-      </div>
-    `;
-    document.body.appendChild(modal);
-
-    const closeButton = modal.querySelector('.close-button');
-    closeButton.addEventListener('click', () => {
-      document.body.removeChild(modal);
-    });
-
-    setTimeout(() => {
-      if (document.body.contains(modal)) {
-        document.body.removeChild(modal);
-      }
-    }, 3000);
-  };
-
-  const changeUserName = async (newName) => {
-    if (user) {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, { name: newName });
-      setUser({ ...user, displayName: newName });
-    }
-  };
-
-  const boardToPosition = (board) => {
-    const pos = {};
-    const pieceTypes = { 'rock': 'R', 'paper': 'P', 'scissors': 'S' };
-    board.forEach((row, rowIndex) => {
-      row.forEach((cell, colIndex) => {
-        if (cell.character) {
-          const [color, type] = cell.character.type.split('-');
-          const square = `${'abcdefg'[colIndex]}${7 - rowIndex}`;
-          pos[square] = `${color === 'blue' ? 'w' : 'b'}${pieceTypes[type]}`;
+        const result = resolveCombat(movingPiece, targetPiece);
+        if (result === 'win') {
+          newBoard[toIndex[0]][toIndex[1]] = movingPiece;
+          newBoard[fromIndex[0]][fromIndex[1]] = null;
+        } else if (result === 'lose') {
+          newBoard[fromIndex[0]][fromIndex[1]] = null;
         }
-      });
-    });
-    return pos;
-  };
-
-  useEffect(() => {
-    setPosition(boardToPosition(board));
-  }, [board]);
-
-  const onPieceDrop = (sourceSquare, targetSquare, piece) => {
-    const newBoard = [...board];
-    const [fromCol, fromRow] = ['abcdefg'.indexOf(sourceSquare[0]), 7 - parseInt(sourceSquare[1])];
-    const [toCol, toRow] = ['abcdefg'.indexOf(targetSquare[0]), 7 - parseInt(targetSquare[1])];
-
-    const movingPiece = newBoard[fromRow][fromCol].character;
-    const targetPiece = newBoard[toRow][toCol].character;
-
-    if (targetPiece && movingPiece.type.split('-')[0] !== targetPiece.type.split('-')[0]) {
-      // Duel logic
-      const winner = determineWinner(movingPiece.type.split('-')[1], targetPiece.type.split('-')[1]);
-      if (winner === movingPiece.type.split('-')[1]) {
-        newBoard[toRow][toCol].character = movingPiece;
-      } else {
-        return false; // Invalid move, piece doesn't capture
       }
     } else {
-      if (newBoard[toRow][toCol].isTrap) {
-        newBoard[toRow][toCol].character = null;
-      } else {
-        newBoard[toRow][toCol].character = movingPiece;
-      }
+      newBoard[toIndex[0]][toIndex[1]] = movingPiece;
+      newBoard[fromIndex[0]][fromIndex[1]] = null;
     }
 
-    newBoard[fromRow][fromCol].character = null;
     setBoard(newBoard);
     updateGameState({
       board: newBoard,
-      turn: turn === 'blue' ? 'red' : 'blue'
+      turn: currentGame.players.find(p => p.id !== turn).id
     });
 
-    return true; // Move was valid
+    const winner = checkWinCondition(newBoard);
+    if (winner) {
+      endGame(winner);
+    }
   };
 
   const updateGameState = (newState) => {
     if (currentGame) {
       const gameRef = ref(rtdb, `games/${currentGame.id}`);
-      update(gameRef, {
-        ...newState,
-        board: serializeBoard(newState.board || currentGame.board)
-      });
+      update(gameRef, newState);
     }
+  };
+
+  const startGame = () => {
+    if (currentGame.blueReady && currentGame.redReady) {
+      const startingPlayer = Math.random() < 0.5 ? currentGame.players[0].id : currentGame.players[1].id;
+      updateGameState({
+        gameStage: 'play',
+        turn: startingPlayer
+      });
+      setGameStage('play');
+      setTurn(startingPlayer);
+      toast.success('Game started!');
+    }
+  };
+
+  const endGame = (winner) => {
+    updateGameState({
+      gameStage: 'ended',
+      winner: winner
+    });
+    setGameStage('ended');
+    toast.success(`Game Over! ${winner === playerColor ? 'You win!' : 'You lose!'}`);
   };
 
   return (
@@ -469,55 +302,30 @@ const App = () => {
       </div>
 
       {/* Main content */}
-      <main className="flex justify-center items-center min-h-[calc(100vh-80px)]">
+      <main className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)]">
         {currentGame ? (
-          <div className="game-container flex flex-col md:flex-row justify-center items-start w-full max-w-6xl mx-auto my-5">
-            <div className="game-board md:w-2/3 mb-4 md:mb-0">
-              {currentGame.players.length === 2 && (
-                <Chessboard 
-                  position={position}
-                  onPieceDrop={onPieceDrop}
-                  customPieces={customPieces}
-                  boardOrientation={currentGame.players[0] === user.uid ? 'white' : 'black'}
-                />
-              )}
+          <div className="game-container flex flex-col w-full max-w-6xl mx-auto my-5">
+            <div className="game-info mb-4">
+              <GameInfo
+                gameStage={gameStage}
+                turn={turn}
+                playerColor={playerColor}
+                currentGame={currentGame}
+              />
             </div>
-            <div className="game-info md:w-1/3 md:pl-4">
-              {currentGame.players.length < 2 ? (
-                <div className="waiting-screen">
-                  <h2 className="text-2xl font-bold">Waiting for second player...</h2>
-                </div>
-              ) : (
-                <>
-                  <h2 className="text-xl font-bold">Game ID: {currentGame.id}</h2>
-                  <h3 className="text-lg mt-2">Players:</h3>
-                  <ul>
-                    {currentGame.players.map((player, index) => (
-                      <li key={index}>{player}</li>
-                    ))}
-                  </ul>
-                  <h3 className="text-lg mt-2 flex items-center">
-                    Turn: {turn === 'blue' ? <FaCircle className="text-blue-500 ml-2" /> : <FaCircle className="text-red-500 ml-2" />}
-                  </h3>
-                  {!currentGame.isStarted && (
-                    <div className="mt-4">
-                      <button onClick={() => setPlacingFlag(true)} className="bg-yellow-500 hover:bg-yellow-600 text-kb-white font-bold py-2 px-4 rounded mr-2" disabled={setupComplete}>
-                        Place Flag
-                      </button>
-                      <button onClick={() => setPlacingTrap(true)} className="bg-red-500 hover:bg-red-600 text-kb-white font-bold py-2 px-4 rounded" disabled={setupComplete}>
-                        Place Trap
-                      </button>
-                    </div>
-                  )}
-                  {!currentGame.isStarted && setupComplete && currentGame.players.length === 2 && (
-                    <button onClick={startGame} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
-                      Start Game
-                    </button>
-                  )}
-                </>
-              )}
+            <div className="flex flex-col md:flex-row justify-center items-start">
+              <div className="game-board w-full md:w-2/3 mb-4 md:mb-0">
+                <GameBoard
+                  board={board}
+                  onSquareClick={handleSetupPlacement}
+                  onPieceDrop={handleMove}
+                  playerColor={playerColor}
+                  currentGame={currentGame}
+                  user={user}
+                />
+              </div>
               {currentGame.players.length === 2 && (
-                <div className="chat-container mt-4">
+                <div className="chat-container w-full md:w-1/3 md:pl-4">
                   <Chat gameId={currentGame.id} user={user} />
                 </div>
               )}
@@ -537,7 +345,7 @@ const App = () => {
           <div className="bg-kb-dark-grey p-6 rounded-lg shadow-lg w-full max-w-3xl text-kb-white">
             <h2 className="text-2xl font-bold mb-4">Game Browser</h2>
             <GameBrowser games={publicGames.concat(privateGames)} onJoinGame={joinGame} currentUser={user} />
-            <button onClick={() => setIsModalOpen(false)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+            <button onClick={() => setIsModalOpen(false)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
               Close
             </button>
           </div>
@@ -548,7 +356,7 @@ const App = () => {
       {inviteLink && (
         <div className="fixed bottom-4 left-4 flex items-center bg-kb-grey p-2 rounded">
           <input type="text" value={inviteLink} readOnly className="bg-kb-dark-grey text-kb-white p-2 rounded mr-2" />
-          <button onClick={copyInviteLink} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded">
+          <button onClick={() => {navigator.clipboard.writeText(inviteLink); toast.info('Invite link copied to clipboard!');}} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded">
             <FaCopy />
           </button>
         </div>

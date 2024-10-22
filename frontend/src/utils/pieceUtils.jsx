@@ -27,7 +27,7 @@ export const CustomPiece = ({ piece, isCurrentPlayer }) => {
   );
 };
 
-export const customPieces = (currentPlayerColor) => ({
+export const customPieces = (board) => ({
   bR: ({ isCurrentPlayer }) => <CustomPiece piece={{ type: 'rock', color: 'blue' }} isCurrentPlayer={isCurrentPlayer} />,
   bP: ({ isCurrentPlayer }) => <CustomPiece piece={{ type: 'paper', color: 'blue' }} isCurrentPlayer={isCurrentPlayer} />,
   bS: ({ isCurrentPlayer }) => <CustomPiece piece={{ type: 'scissors', color: 'blue' }} isCurrentPlayer={isCurrentPlayer} />,
@@ -40,16 +40,22 @@ export const customPieces = (currentPlayerColor) => ({
   rT: ({ isCurrentPlayer }) => <CustomPiece piece={{ type: 'trap', color: 'red' }} isCurrentPlayer={isCurrentPlayer} />,
 });
 
-export const boardToPosition = (board, currentPlayerColor) => {
-  const position = {};
+export const boardToPosition = (board, currentGame, user) => {
+  if (!board || !currentGame || !user) return {};
+  const pos = {};
+  const pieceTypes = { 'rock': 'R', 'paper': 'P', 'scissors': 'S', 'flag': 'F', 'trap': 'T' };
+  const currentPlayerColor = currentGame.players[0].id === user.uid ? 'blue' : 'red';
   board.forEach((row, rowIndex) => {
     row.forEach((piece, colIndex) => {
       if (piece) {
         const square = `${'abcdefg'[colIndex]}${7 - rowIndex}`;
-        const pieceCode = `${piece.color === 'blue' ? 'b' : 'r'}${piece.type[0].toUpperCase()}`;
-        position[square] = pieceCode;
+        if (piece.color === currentPlayerColor) {
+          pos[square] = `${piece.color === 'blue' ? 'b' : 'r'}${pieceTypes[piece.type]}`;
+        } else {
+          pos[square] = `${piece.color === 'blue' ? 'b' : 'r'}X`;
+        }
       }
     });
   });
-  return position;
+  return pos;
 };
