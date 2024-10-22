@@ -8,7 +8,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
 import Auth from './Auth';
 import { Chessboard } from 'react-chessboard';
-import { FaUserCircle, FaCircle, FaCopy } from 'react-icons/fa';
+import { FaUserCircle, FaCircle, FaCopy, FaBars, FaTimes } from 'react-icons/fa';
 import GameBrowser from './GameBrowser';
 import Chat from './Chat';
 
@@ -89,6 +89,8 @@ const App = () => {
   const [inviteLink, setInviteLink] = useState('');
   const [publicGames, setPublicGames] = useState([]);
   const [privateGames, setPrivateGames] = useState([]);
+  const [setupComplete, setSetupComplete] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'games'), (snapshot) => {
@@ -163,7 +165,8 @@ const App = () => {
         players: [user.uid],
         isStarted: false,
         isPublic: isPublic,
-        turn: null
+        turn: null,
+        setupComplete: false
       };
       await set(newGameRef, newGame);
       setCurrentGame({ ...newGame, board: deserializeBoard(newGame.board) });
@@ -183,12 +186,17 @@ const App = () => {
     
     if (gameSnapshot.exists()) {
       const gameData = gameSnapshot.val();
-      if (!gameData.players.includes(user.uid)) {
+      if (!gameData.players.includes(user.uid) && gameData.players.length < 2) {
         const updatedPlayers = [...gameData.players, user.uid];
         await update(gameRef, { players: updatedPlayers });
+        setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board), players: updatedPlayers });
+        toast.success('Joined game successfully!');
+      } else if (gameData.players.includes(user.uid)) {
+        setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board) });
+        toast.info('Rejoined existing game.');
+      } else {
+        toast.error('Game is full!');
       }
-      setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board) });
-      toast.success('Joined game successfully!');
     } else {
       toast.error('Game not found!');
     }
@@ -200,13 +208,16 @@ const App = () => {
   };
 
   const startGame = () => {
-    if (currentGame && currentGame.players.length === 2) {
+    if (currentGame && currentGame.players.length === 2 && setupComplete) {
       const startingPlayer = Math.random() < 0.5 ? 'blue' : 'red';
       setTurn(startingPlayer);
-      setCurrentGame(prevGame => ({
-        ...prevGame,
-        isStarted: true
-      }));
+      updateGameState({
+        isStarted: true,
+        turn: startingPlayer
+      });
+      toast.success('Game started!');
+    } else {
+      toast.error('Cannot start game. Ensure both players have completed setup.');
     }
   };
 
@@ -222,6 +233,11 @@ const App = () => {
   };
 
   const handleMove = (from, to) => {
+    if (currentGame.turn !== (currentGame.players[0] === user.uid ? 'blue' : 'red')) {
+      toast.error("It's not your turn!");
+      return;
+    }
+
     const newBoard = [...board];
     const [fromRow, fromCol] = from;
     const [toRow, toCol] = to;
@@ -233,14 +249,16 @@ const App = () => {
       const winner = determineWinner(movingPiece.type.split('-')[1], targetPiece.type.split('-')[1]);
       if (winner === movingPiece.type.split('-')[1]) {
         newBoard[toRow][toCol].character = movingPiece; // Move piece
+        toast.success(`${movingPiece.type} defeats ${targetPiece.type}!`);
       } else {
         newBoard[toRow][toCol].character = targetPiece; // Target piece stays
+        toast.error(`${targetPiece.type} defeats ${movingPiece.type}!`);
       }
       newBoard[fromRow][fromCol].character = null; // Clear original position
-      showModal(winner, movingPiece, targetPiece);
     } else {
       if (newBoard[toRow][toCol].isTrap) {
         newBoard[toRow][toCol].character = null; // Trap triggered, piece dies
+        toast.warning('Trap triggered! Piece destroyed.');
       } else {
         newBoard[toRow][toCol].character = movingPiece; // Move piece
       }
@@ -252,6 +270,11 @@ const App = () => {
       board: newBoard,
       turn: turn === 'blue' ? 'red' : 'blue'
     });
+
+    if (checkGameOver(newBoard)) {
+      toast.success(`Game Over! ${turn === 'blue' ? 'Blue' : 'Red'} wins!`);
+      updateGameState({ isStarted: false });
+    }
   };
 
   const handlePlaceFlag = (rowIndex, cellIndex) => {
@@ -259,6 +282,8 @@ const App = () => {
     newBoard[rowIndex][cellIndex].isFlag = true;
     setBoard(newBoard);
     setPlacingFlag(false);
+    checkSetupComplete();
+    updateGameState({ board: newBoard });
   };
 
   const handlePlaceTrap = (rowIndex, cellIndex) => {
@@ -266,6 +291,17 @@ const App = () => {
     newBoard[rowIndex][cellIndex].isTrap = true;
     setBoard(newBoard);
     setPlacingTrap(false);
+    checkSetupComplete();
+    updateGameState({ board: newBoard });
+  };
+
+  const checkSetupComplete = () => {
+    const playerSetupComplete = board.some(row => row.some(cell => cell.isFlag)) &&
+                                board.some(row => row.some(cell => cell.isTrap));
+    if (playerSetupComplete) {
+      setSetupComplete(true);
+      updateGameState({ setupComplete: true });
+    }
   };
 
   const handleCellClick = (rowIndex, cellIndex) => {
@@ -389,8 +425,7 @@ const App = () => {
   const updateGameState = (newState) => {
     if (currentGame) {
       const gameRef = ref(rtdb, `games/${currentGame.id}`);
-      set(gameRef, {
-        ...currentGame,
+      update(gameRef, {
         ...newState,
         board: serializeBoard(newState.board || currentGame.board)
       });
@@ -400,16 +435,25 @@ const App = () => {
   return (
     <div className="App bg-kb-black text-kb-white min-h-screen">
       <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover />
-      <header className="App-header p-4">
-        <h1 className="text-4xl font-bold mb-6">RPS on ICQ</h1>
+      
+      {/* Header with menu button */}
+      <header className="flex justify-between items-center p-4">
+        <h1 className="text-2xl font-bold text-kb-live-red">RPS Revival</h1>
+        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="text-kb-white">
+          {isMenuOpen ? <FaTimes size={24} /> : <FaBars size={24} />}
+        </button>
+      </header>
+
+      {/* Side menu */}
+      <div className={`fixed top-0 right-0 h-full w-64 bg-kb-dark-grey p-4 transform ${isMenuOpen ? 'translate-x-0' : 'translate-x-full'} transition-transform duration-300 ease-in-out z-50`}>
         <Auth />
-        <div className="flex flex-col sm:flex-row gap-4 mt-4">
+        <div className="flex flex-col gap-4 mt-4">
           {user ? (
             <>
-              <button onClick={() => createGame(true)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
+              <button onClick={() => { createGame(true); setIsMenuOpen(false); }} className="bg-kb-live-red hover:bg-kb-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
                 Create Public Game
               </button>
-              <button onClick={() => createGame(false)} className="bg-kb-grey hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
+              <button onClick={() => { createGame(false); setIsMenuOpen(false); }} className="bg-kb-grey hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
                 Create Private Game
               </button>
             </>
@@ -422,70 +466,13 @@ const App = () => {
             Browse Games
           </button>
         </div>
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-kb-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-kb-dark-grey p-6 rounded-lg shadow-lg w-full max-w-3xl text-kb-white">
-              <h2 className="text-2xl font-bold mb-4">Game Browser</h2>
-              <h3 className="text-xl font-bold mt-4">Public Games</h3>
-              <GameBrowser games={publicGames} onJoinGame={joinGame} currentUser={user} />
-              <h3 className="text-xl font-bold mt-4">Private Games</h3>
-              <GameBrowser games={privateGames} onJoinGame={joinGame} currentUser={user} />
-              <button onClick={() => setIsModalOpen(false)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-        {currentGame && (
-          <div className="game-container flex flex-col lg:flex-row justify-between w-full max-w-6xl mx-auto my-5">
-            <div className="game-info lg:w-1/4 mb-4 lg:mb-0">
-              {currentGame.players.length < 2 ? (
-                <div className="waiting-screen">
-                  <h2 className="text-2xl font-bold">Waiting for second player...</h2>
-                </div>
-              ) : (
-                <>
-                  <h2 className="text-2xl font-bold">Game ID: {currentGame.id}</h2>
-                  <h3 className="text-xl">Players:</h3>
-                  <ul>
-                    {currentGame.players.map((player, index) => (
-                      <li key={index}>{player}</li>
-                    ))}
-                  </ul>
-                  <h3 className="text-xl flex items-center">
-                    Turn: {turn === 'blue' ? <FaCircle className="text-blue-500" /> : <FaCircle className="text-red-500" />}
-                  </h3>
-                  {!currentGame.isStarted && (
-                    <button onClick={startGame} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
-                      Start Game
-                    </button>
-                  )}
-                  <div className="flex items-center mt-4">
-                    <FaUserCircle className={`text-4xl ${currentGame.players[0] === user.uid ? 'text-blue-500' : 'text-red-500'}`} />
-                    <span className="ml-2 text-xl">{currentGame.players[0] === user.uid ? 'You are Blue' : 'You are Red'}</span>
-                  </div>
-                  <button onClick={() => setPlacingFlag(true)} className="bg-yellow-500 hover:bg-yellow-600 text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
-                    Place Flag
-                  </button>
-                  <button onClick={() => setPlacingTrap(true)} className="bg-red-500 hover:bg-red-600 text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
-                    Place Trap
-                  </button>
-                  <div className="mt-4">
-                    <input
-                      type="text"
-                      placeholder="Enter new name"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="bg-kb-grey text-kb-white p-2 rounded"
-                    />
-                    <button onClick={() => changeUserName(newName)} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded ml-2 transition duration-300">
-                      Change Name
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="game-board lg:w-1/2">
+      </div>
+
+      {/* Main content */}
+      <main className="flex justify-center items-center min-h-[calc(100vh-80px)]">
+        {currentGame ? (
+          <div className="game-container flex flex-col md:flex-row justify-center items-start w-full max-w-6xl mx-auto my-5">
+            <div className="game-board md:w-2/3 mb-4 md:mb-0">
               {currentGame.players.length === 2 && (
                 <Chessboard 
                   position={position}
@@ -495,22 +482,77 @@ const App = () => {
                 />
               )}
             </div>
-            {currentGame.players.length === 2 && (
-              <div className="chat-container lg:w-1/4 mt-4 lg:mt-0">
-                <Chat gameId={currentGame.id} user={user} />
-              </div>
-            )}
+            <div className="game-info md:w-1/3 md:pl-4">
+              {currentGame.players.length < 2 ? (
+                <div className="waiting-screen">
+                  <h2 className="text-2xl font-bold">Waiting for second player...</h2>
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-xl font-bold">Game ID: {currentGame.id}</h2>
+                  <h3 className="text-lg mt-2">Players:</h3>
+                  <ul>
+                    {currentGame.players.map((player, index) => (
+                      <li key={index}>{player}</li>
+                    ))}
+                  </ul>
+                  <h3 className="text-lg mt-2 flex items-center">
+                    Turn: {turn === 'blue' ? <FaCircle className="text-blue-500 ml-2" /> : <FaCircle className="text-red-500 ml-2" />}
+                  </h3>
+                  {!currentGame.isStarted && (
+                    <div className="mt-4">
+                      <button onClick={() => setPlacingFlag(true)} className="bg-yellow-500 hover:bg-yellow-600 text-kb-white font-bold py-2 px-4 rounded mr-2" disabled={setupComplete}>
+                        Place Flag
+                      </button>
+                      <button onClick={() => setPlacingTrap(true)} className="bg-red-500 hover:bg-red-600 text-kb-white font-bold py-2 px-4 rounded" disabled={setupComplete}>
+                        Place Trap
+                      </button>
+                    </div>
+                  )}
+                  {!currentGame.isStarted && setupComplete && currentGame.players.length === 2 && (
+                    <button onClick={startGame} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+                      Start Game
+                    </button>
+                  )}
+                </>
+              )}
+              {currentGame.players.length === 2 && (
+                <div className="chat-container mt-4">
+                  <Chat gameId={currentGame.id} user={user} />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">Welcome to RPS Revival</h2>
+            <p>Create a new game or join an existing one to start playing!</p>
           </div>
         )}
-        {inviteLink && (
-          <div className="mt-4 flex items-center">
-            <input type="text" value={inviteLink} readOnly className="bg-kb-grey text-kb-white p-2 rounded flex-grow" />
-            <button onClick={copyInviteLink} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded ml-2 transition duration-300">
-              <FaCopy />
+      </main>
+
+      {/* Game browser modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-kb-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-kb-dark-grey p-6 rounded-lg shadow-lg w-full max-w-3xl text-kb-white">
+            <h2 className="text-2xl font-bold mb-4">Game Browser</h2>
+            <GameBrowser games={publicGames.concat(privateGames)} onJoinGame={joinGame} currentUser={user} />
+            <button onClick={() => setIsModalOpen(false)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+              Close
             </button>
           </div>
-        )}
-      </header>
+        </div>
+      )}
+
+      {/* Invite link */}
+      {inviteLink && (
+        <div className="fixed bottom-4 left-4 flex items-center bg-kb-grey p-2 rounded">
+          <input type="text" value={inviteLink} readOnly className="bg-kb-dark-grey text-kb-white p-2 rounded mr-2" />
+          <button onClick={copyInviteLink} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded">
+            <FaCopy />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
