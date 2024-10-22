@@ -2,13 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Add your custom styles here */
-body {
-  @apply bg-gray-900 text-white;
+@layer base {
+  body {
+    @apply bg-kb-black text-kb-white;
+  }
 }
 
 .App-header {
-  @apply p-4 bg-gray-800 rounded-lg shadow-lg;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: theme('colors.kb-black');
+  color: theme('colors.kb-white');
 }
 
 ul {
@@ -20,9 +27,65 @@ li {
 }
 
 button {
-  @apply bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded;
+  @apply bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded;
 }
 
-input {
-  @apply bg-gray-700 text-white border border-gray-600 rounded py-2 px-4 mb-2;
+input[type="text"] {
+  @apply bg-kb-dark-grey text-kb-white p-2 border border-kb-grey rounded;
+}
+
+.grid {
+  @apply grid grid-cols-7 gap-1 p-4 bg-kb-dark-grey rounded-lg shadow-lg border border-kb-grey;
+}
+
+.grid > div {
+  @apply w-16 h-16 border border-kb-grey flex items-center justify-center;
+}
+
+.cursor-pointer {
+  @apply cursor-pointer;
+}
+
+.modal {
+  @apply fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-kb-dark-grey text-kb-white p-5 rounded-lg shadow-lg z-50;
+}
+
+.modal-content {
+  @apply text-center;
+}
+
+.close-button {
+  @apply absolute top-2 right-2 cursor-pointer;
+}
+
+.game-container {
+  @apply flex flex-row justify-between w-full max-w-6xl mx-auto my-5;
+}
+
+.game-info {
+  @apply flex-1 mr-5;
+}
+
+.game-board {
+  @apply flex-2;
+}
+
+.chat-container {
+  @apply w-72 mt-5;
+}
+
+.messages-container {
+  @apply border border-kb-grey p-2 mb-2;
+}
+
+.message {
+  @apply mb-1;
+}
+
+.message.text-right {
+  @apply text-right text-green-500;
+}
+
+.message.text-left {
+  @apply text-left text-blue-500;
 }

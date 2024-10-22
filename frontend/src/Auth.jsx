@@ -1,83 +1,75 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { auth } from './firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, signInAnonymously } from 'firebase/auth';
+import { toast } from 'react-toastify';
 
 const Auth = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState(null);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUser(user);
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const handleSignUp = async () => {
+  const handleSignIn = async (e) => {
+    e.preventDefault();
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      setUser(userCredential.user);
+      await signInWithEmailAndPassword(auth, email, password);
+      toast.success('Signed in successfully!');
     } catch (error) {
-      console.error(error);
+      toast.error(`Sign in error: ${error.message}`);
     }
   };
 
-  const handleSignIn = async () => {
+  const handleSignUp = async (e) => {
+    e.preventDefault();
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      setUser(userCredential.user);
+      await createUserWithEmailAndPassword(auth, email, password);
+      toast.success('Account created successfully!');
     } catch (error) {
-      console.error(error);
+      toast.error(`Sign up error: ${error.message}`);
     }
   };
 
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      setUser(null);
+      toast.info('Signed out successfully!');
     } catch (error) {
-      console.error(error);
+      toast.error(`Sign out error: ${error.message}`);
+    }
+  };
+
+  const handleGuestSignIn = async () => {
+    try {
+      await signInAnonymously(auth);
+      toast.success('Signed in as guest!');
+    } catch (error) {
+      toast.error(`Guest sign in error: ${error.message}`);
     }
   };
 
   return (
-    <div className="flex flex-col items-center">
-      {user ? (
+    <div>
+      {auth.currentUser ? (
         <div>
-          <p>Welcome, {user.email}</p>
-          <button onClick={handleSignOut} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-            Sign Out
-          </button>
+          <p>Signed in as: {auth.currentUser.email || 'Guest'}</p>
+          <button onClick={handleSignOut}>Sign Out</button>
         </div>
       ) : (
-        <div className="flex flex-col items-center">
+        <form>
           <input
             type="email"
-            placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="bg-gray-700 text-white border border-gray-600 rounded py-2 px-4 mb-2"
+            placeholder="Email"
           />
           <input
             type="password"
-            placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="bg-gray-700 text-white border border-gray-600 rounded py-2 px-4 mb-2"
+            placeholder="Password"
           />
-          <button onClick={handleSignUp} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-2">
-            Sign Up
-          </button>
-          <button onClick={handleSignIn} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-            Sign In
-          </button>
-        </div>
+          <button onClick={handleSignIn}>Sign In</button>
+          <button onClick={handleSignUp}>Sign Up</button>
+          <button onClick={handleGuestSignIn}>Play as Guest</button>
+        </form>
       )}
     </div>
   );
