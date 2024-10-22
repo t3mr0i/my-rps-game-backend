@@ -1,7 +1,6 @@
 import React from 'react';
 import { FaUser, FaGem, FaToiletPaper, FaFlag, FaTimes, FaArrowRight, FaArrowLeft, FaArrowUp, FaArrowDown } from 'react-icons/fa';
 import { GiScissors } from 'react-icons/gi';
-
 const GameBoard = ({ board, onCellClick, placingFlag, placingTrap, selectedCell, validMoves }) => {
   console.log('Board data:', board);
 

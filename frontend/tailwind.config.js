@@ -15,6 +15,9 @@ module.exports = {
           'light-grey': '#A8ADB4',
         },
       },
+      flexGrow: {
+        '2': '2',
+      },
     },
   },
   plugins: [],

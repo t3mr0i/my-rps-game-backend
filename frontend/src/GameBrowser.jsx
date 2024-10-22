@@ -17,17 +17,27 @@ const GameBrowser = ({ games, onJoinGame, currentUser }) => {
       {
         Header: 'Players',
         accessor: 'players',
-        Cell: ({ value }) => `${value.length}/2`,
+        Cell: ({ value }) => Array.isArray(value) ? `${value.length}/2` : 'N/A',
       },
       {
         Header: 'Actions',
-        Cell: ({ row }) => (
-          currentUser && !row.original.players.includes(currentUser.uid) && !row.original.isStarted ? (
-            <button onClick={() => onJoinGame(row.original.id)} className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded">
+        Cell: ({ row }) => {
+          const game = row.original;
+          const canJoin = currentUser && 
+                          game && 
+                          Array.isArray(game.players) && 
+                          !game.players.includes(currentUser.uid) && 
+                          !game.isStarted;
+          
+          return canJoin ? (
+            <button 
+              onClick={() => onJoinGame(game.id)} 
+              className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded"
+            >
               Join Game
             </button>
-          ) : null
-        ),
+          ) : null;
+        },
       },
     ],
     [currentUser, onJoinGame]
