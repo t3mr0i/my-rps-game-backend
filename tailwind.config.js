@@ -6,15 +6,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'kb-black': '#131417',
-        'kb-live-red': '#FF4600',
-        'kb-white': '#DEE4EC',
-        'kb-dark-grey': '#474B4E',
-        'kb-grey': '#7E8187',
-        'kb-light-grey': '#A8ADB4',
+        kb: {
+          black: '#131417',
+          'live-red': '#FF4600',
+          white: '#DEE4EC',
+          'dark-grey': '#474B4E',
+          grey: '#7E8187',
+          'light-grey': '#A8ADB4',
+        },
+      },
+      flexGrow: {
+        '2': '2',
       },
     },
   },
-  variants: {},
   plugins: [],
 }

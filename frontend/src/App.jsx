@@ -385,10 +385,10 @@ const App = () => {
         <Auth />
         {user ? (
           <>
-            <button onClick={() => createGame(true)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+            <button onClick={() => createGame(true)} className="bg-kb-live-red hover:bg-kb-dark-grey font-bold py-2 px-4 rounded mt-4">
               Create Public Game
             </button>
-            <button onClick={() => createGame(false)} className="bg-kb-grey hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+            <button onClick={() => createGame(false)} className="bg-kb-grey hover:bg-kb-dark-grey  font-bold py-2 px-4 rounded mt-4">
               Create Private Game
             </button>
           </>
@@ -397,7 +397,7 @@ const App = () => {
             Play as Guest
           </button>
         )}
-        <button onClick={() => setIsModalOpen(true)} className="bg-kb-dark-grey hover:bg-kb-grey text-kb-white font-bold py-2 px-4 rounded mt-4">
+        <button onClick={() => setIsModalOpen(true)} className="bg-kb-dark-grey hover:bg-kb-grey  font-bold py-2 px-4 rounded mt-4">
           Browse Games
         </button>
         {isModalOpen && (
