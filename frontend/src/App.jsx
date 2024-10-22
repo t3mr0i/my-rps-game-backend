@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth, rtdb } from './firebase';
 import { collection, onSnapshot, addDoc, updateDoc, doc, arrayUnion, getDoc, query, where } from 'firebase/firestore';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
-import { ref, onValue, set } from 'firebase/database';
+import { ref, onValue, set, push, get, update } from 'firebase/database';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
@@ -141,18 +141,33 @@ const App = () => {
     }
   }, [currentGame?.id]);
 
+  useEffect(() => {
+    const handleGameLink = async () => {
+      const path = window.location.pathname;
+      const match = path.match(/\/game\/(.+)/);
+      if (match && match[1]) {
+        const gameId = match[1];
+        await joinGame(gameId);
+      }
+    };
+
+    handleGameLink();
+  }, [user]); // Add this useEffect near the top of your component
+
   const createGame = async (isPublic = true) => {
     if (user) {
+      const newGameRef = push(ref(rtdb, 'games'));
       const newGame = {
-        id: Math.random().toString(36).substr(2, 9),
-        board: serializeBoard(board),
+        id: newGameRef.key,
+        board: serializeBoard(initialBoard()),
         players: [user.uid],
         isStarted: false,
-        isPublic: isPublic
+        isPublic: isPublic,
+        turn: null
       };
-      const docRef = await addDoc(collection(db, 'games'), newGame);
-      setCurrentGame({ ...newGame, id: docRef.id });
-      setInviteLink(`${window.location.origin}/game/${docRef.id}`);
+      await set(newGameRef, newGame);
+      setCurrentGame({ ...newGame, board: deserializeBoard(newGame.board) });
+      setInviteLink(`${window.location.origin}/game/${newGameRef.key}`);
       toast.success('Game created successfully!');
     } else {
       toast.error('Please sign in to create a game.');
@@ -163,15 +178,20 @@ const App = () => {
     if (!user) {
       await signInAnonymously(auth);
     }
-    const gameRef = doc(db, 'games', gameId);
-    await updateDoc(gameRef, {
-      players: arrayUnion(user.uid)
-    });
-    const gameSnap = await getDoc(gameRef);
-    const gameData = gameSnap.data();
-    gameData.board = deserializeBoard(gameData.board);
-    setCurrentGame({ id: gameSnap.id, ...gameData });
-    toast.success('Joined game successfully!');
+    const gameRef = ref(rtdb, `games/${gameId}`);
+    const gameSnapshot = await get(gameRef);
+    
+    if (gameSnapshot.exists()) {
+      const gameData = gameSnapshot.val();
+      if (!gameData.players.includes(user.uid)) {
+        const updatedPlayers = [...gameData.players, user.uid];
+        await update(gameRef, { players: updatedPlayers });
+      }
+      setCurrentGame({ id: gameId, ...gameData, board: deserializeBoard(gameData.board) });
+      toast.success('Joined game successfully!');
+    } else {
+      toast.error('Game not found!');
+    }
   };
 
   const copyInviteLink = () => {
@@ -378,45 +398,47 @@ const App = () => {
   };
 
   return (
-    <div className="App">
+    <div className="App bg-kb-black text-kb-white min-h-screen">
       <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover />
-      <header className="App-header">
-        <h1 className="text-4xl font-bold">RPS on ICQ</h1>
+      <header className="App-header p-4">
+        <h1 className="text-4xl font-bold mb-6">RPS on ICQ</h1>
         <Auth />
-        {user ? (
-          <>
-            <button onClick={() => createGame(true)} className="bg-kb-live-red hover:bg-kb-dark-grey font-bold py-2 px-4 rounded mt-4">
-              Create Public Game
+        <div className="flex flex-col sm:flex-row gap-4 mt-4">
+          {user ? (
+            <>
+              <button onClick={() => createGame(true)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
+                Create Public Game
+              </button>
+              <button onClick={() => createGame(false)} className="bg-kb-grey hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
+                Create Private Game
+              </button>
+            </>
+          ) : (
+            <button onClick={() => signInAnonymously(auth)} className="bg-kb-light-grey hover:bg-kb-dark-grey text-kb-black font-bold py-2 px-4 rounded transition duration-300">
+              Play as Guest
             </button>
-            <button onClick={() => createGame(false)} className="bg-kb-grey hover:bg-kb-dark-grey  font-bold py-2 px-4 rounded mt-4">
-              Create Private Game
-            </button>
-          </>
-        ) : (
-          <button onClick={() => signInAnonymously(auth)} className="bg-kb-light-grey hover:bg-kb-dark-grey text-kb-black font-bold py-2 px-4 rounded mt-4">
-            Play as Guest
+          )}
+          <button onClick={() => setIsModalOpen(true)} className="bg-kb-dark-grey hover:bg-kb-grey text-kb-white font-bold py-2 px-4 rounded transition duration-300">
+            Browse Games
           </button>
-        )}
-        <button onClick={() => setIsModalOpen(true)} className="bg-kb-dark-grey hover:bg-kb-grey  font-bold py-2 px-4 rounded mt-4">
-          Browse Games
-        </button>
+        </div>
         {isModalOpen && (
-          <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50">
-            <div className="bg-gray-700 p-6 rounded-lg shadow-lg w-3/4 max-w-3xl text-white">
+          <div className="fixed inset-0 bg-kb-black bg-opacity-75 flex items-center justify-center z-50">
+            <div className="bg-kb-dark-grey p-6 rounded-lg shadow-lg w-full max-w-3xl text-kb-white">
               <h2 className="text-2xl font-bold mb-4">Game Browser</h2>
               <h3 className="text-xl font-bold mt-4">Public Games</h3>
               <GameBrowser games={publicGames} onJoinGame={joinGame} currentUser={user} />
               <h3 className="text-xl font-bold mt-4">Private Games</h3>
               <GameBrowser games={privateGames} onJoinGame={joinGame} currentUser={user} />
-              <button onClick={() => setIsModalOpen(false)} className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded mt-4">
+              <button onClick={() => setIsModalOpen(false)} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
                 Close
               </button>
             </div>
           </div>
         )}
         {currentGame && (
-          <div className="game-container">
-            <div className="game-info">
+          <div className="game-container flex flex-col lg:flex-row justify-between w-full max-w-6xl mx-auto my-5">
+            <div className="game-info lg:w-1/4 mb-4 lg:mb-0">
               {currentGame.players.length < 2 ? (
                 <div className="waiting-screen">
                   <h2 className="text-2xl font-bold">Waiting for second player...</h2>
@@ -434,7 +456,7 @@ const App = () => {
                     Turn: {turn === 'blue' ? <FaCircle className="text-blue-500" /> : <FaCircle className="text-red-500" />}
                   </h3>
                   {!currentGame.isStarted && (
-                    <button onClick={startGame} className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mt-4">
+                    <button onClick={startGame} className="bg-kb-live-red hover:bg-kb-dark-grey text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
                       Start Game
                     </button>
                   )}
@@ -442,10 +464,10 @@ const App = () => {
                     <FaUserCircle className={`text-4xl ${currentGame.players[0] === user.uid ? 'text-blue-500' : 'text-red-500'}`} />
                     <span className="ml-2 text-xl">{currentGame.players[0] === user.uid ? 'You are Blue' : 'You are Red'}</span>
                   </div>
-                  <button onClick={() => setPlacingFlag(true)} className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded mt-4">
+                  <button onClick={() => setPlacingFlag(true)} className="bg-yellow-500 hover:bg-yellow-600 text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
                     Place Flag
                   </button>
-                  <button onClick={() => setPlacingTrap(true)} className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded mt-4">
+                  <button onClick={() => setPlacingTrap(true)} className="bg-red-500 hover:bg-red-600 text-kb-white font-bold py-2 px-4 rounded mt-4 transition duration-300">
                     Place Trap
                   </button>
                   <div className="mt-4">
@@ -454,16 +476,16 @@ const App = () => {
                       placeholder="Enter new name"
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
-                      className="bg-gray-700 text-white p-2 rounded"
+                      className="bg-kb-grey text-kb-white p-2 rounded"
                     />
-                    <button onClick={() => changeUserName(newName)} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2">
+                    <button onClick={() => changeUserName(newName)} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded ml-2 transition duration-300">
                       Change Name
                     </button>
                   </div>
                 </>
               )}
             </div>
-            <div className="game-board">
+            <div className="game-board lg:w-1/2">
               {currentGame.players.length === 2 && (
                 <Chessboard 
                   position={position}
@@ -474,16 +496,18 @@ const App = () => {
               )}
             </div>
             {currentGame.players.length === 2 && (
-              <Chat gameId={currentGame.id} user={user} />
-            )}
-            {inviteLink && (
-              <div className="mt-4 flex items-center">
-                <input type="text" value={inviteLink} readOnly className="bg-gray-700 text-white p-2 rounded" />
-                <button onClick={copyInviteLink} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2">
-                  <FaCopy />
-                </button>
+              <div className="chat-container lg:w-1/4 mt-4 lg:mt-0">
+                <Chat gameId={currentGame.id} user={user} />
               </div>
             )}
+          </div>
+        )}
+        {inviteLink && (
+          <div className="mt-4 flex items-center">
+            <input type="text" value={inviteLink} readOnly className="bg-kb-grey text-kb-white p-2 rounded flex-grow" />
+            <button onClick={copyInviteLink} className="bg-blue-500 hover:bg-blue-600 text-kb-white font-bold py-2 px-4 rounded ml-2 transition duration-300">
+              <FaCopy />
+            </button>
           </div>
         )}
       </header>

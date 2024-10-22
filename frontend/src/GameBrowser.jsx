@@ -59,7 +59,7 @@ const GameBrowser = ({ games, onJoinGame, currentUser }) => {
         value={globalFilter || ''}
         onChange={e => setGlobalFilter(e.target.value)}
         placeholder="Search games..."
-        className="mb-4 p-2 border rounded"
+        className="mb-4 p-2 border rounded bg-kb-grey text-kb-white"
       />
       <table {...getTableProps()} className="w-full">
         <thead>
